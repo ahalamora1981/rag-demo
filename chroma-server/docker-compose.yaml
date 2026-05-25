@@ -1,0 +1,8 @@
+services:
+  chroma:
+    image: chromadb/chroma:latest
+    container_name: chroma-server
+    ports:
+      - "8100:8000"
+    volumes:
+      - ./chroma-data:/data

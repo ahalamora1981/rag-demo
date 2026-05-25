@@ -1,0 +1,241 @@
+import json
+from typing import Literal
+from langchain_core.messages import SystemMessage, HumanMessage
+from src.graph.state import RAGState
+from langchain_openai import ChatOpenAI
+from langchain_chroma import Chroma
+from src import config
+from src.embeddings import create_embeddings
+from src.indexing.indexer import get_vectorstore
+from src.timer import timer
+
+
+def _get_llm():
+    return ChatOpenAI(
+        model=config.LLM_MODEL,
+        base_url=config.LLM_BASE_URL,
+        api_key=config.LLM_API_KEY,
+        temperature=0.1,
+    )
+
+
+@timer("intent_recognition")
+def intent_recognition_node(state: RAGState) -> dict:
+    llm = _get_llm()
+    question = state.get("expanded_question") or state["current_question"]
+
+    prompt = f"""你是一个法律问答系统的意图识别器。
+判断用户的问题是法律相关问题还是非法律问题。
+
+法律相关问题包括但不限于：劳动法、劳动合同法、民法典、消费者权益保护法、
+合同纠纷、婚姻家庭、继承、侵权、物权、债权、劳动争议、消费维权等。
+
+请以JSON格式回答，不要其他内容：
+{{
+    "is_legal": true/false,
+    "reason": "简短判断理由"
+}}
+
+用户问题：{question}"""
+
+    resp = llm.invoke([HumanMessage(content=prompt)])
+    try:
+        result = json.loads(resp.content.strip().removeprefix("```json").removesuffix("```").strip())
+    except json.JSONDecodeError:
+        result = {"is_legal": True, "reason": "解析失败，默认按法律问题处理"}
+
+    return {
+        "intent": "legal" if result["is_legal"] else "non-legal",
+        "intent_reason": result.get("reason", ""),
+    }
+
+
+@timer("reject_non_legal")
+def reject_non_legal_node(state: RAGState) -> dict:
+    llm = _get_llm()
+    question = state["current_question"]
+    reason = state.get("intent_reason", "")
+
+    prompt = f"""用户的问题不是法律相关问题。
+请礼貌告知只能回答法律相关问题，并列出以下可咨询的法律领域：
+- 劳动法（劳动合同、工资、工时、社保等）
+- 劳动合同法（签订、解除、经济补偿等）
+- 民法典（婚姻家庭、继承、合同、侵权等）
+- 消费者权益保护法（消费维权、退货、欺诈赔偿等）
+
+判断理由：{reason}
+用户问题：{question}
+
+请用中文简洁回答。"""
+
+    resp = llm.invoke([HumanMessage(content=prompt)])
+    return {"answer": resp.content}
+
+
+@timer("context_expansion")
+def context_expansion_node(state: RAGState) -> dict:
+    if len(state["messages"]) <= 1:
+        return {"expanded_question": state["current_question"]}
+
+    llm = _get_llm()
+    history_text = "\n".join(
+        f"{'用户' if isinstance(m, HumanMessage) else 'AI'}: {m.content}"
+        for m in state["messages"][-4:-1]
+    )
+
+    prompt = f"""下面是对话历史，以及用户的最新问题。
+请结合历史上下文，将最新问题改写为一个独立、完整的单轮问题，
+确保不依赖上下文也能理解。
+
+对话历史：
+{history_text}
+
+最新问题：{state["current_question"]}
+
+请只输出改写后的问题，不要其他内容。"""
+
+    resp = llm.invoke([HumanMessage(content=prompt)])
+    return {"expanded_question": resp.content.strip()}
+
+
+@timer("question_rewriting")
+def question_rewriting_node(state: RAGState) -> dict:
+    llm = _get_llm()
+    question = state.get("expanded_question") or state["current_question"]
+
+    prompt = f"""你是一个法律检索优化专家。
+请将用户的问题改写成更适合向量检索的形式，要求：
+1. 提取关键法律概念和关键词
+2. 去除指代和上下文依赖
+3. 保持法律术语的准确性
+4. 输出简洁的检索语句
+
+原问题：{question}
+
+请只输出改写后的检索语句，不要其他内容。"""
+
+    resp = llm.invoke([HumanMessage(content=prompt)])
+    return {"rewritten_question": resp.content.strip()}
+
+
+@timer("retrieve")
+def retrieve_node(state: RAGState) -> dict:
+    try:
+        vectorstore = get_vectorstore()
+    except Exception as e:
+        return {"error": f"Failed to connect to Chroma: {e}", "retrieved_docs": []}
+
+    query = state.get("rewritten_question") or state.get("expanded_question") or state["current_question"]
+
+    results = vectorstore.similarity_search_with_score(query, k=config.RETRIEVAL_K)
+
+    docs = []
+    for doc, score in results:
+        docs.append({
+            "content": doc.page_content,
+            "law_name": doc.metadata.get("law_name", ""),
+            "article_range": doc.metadata.get("article_range", ""),
+            "source_url": doc.metadata.get("source_url", ""),
+            "score": round(score, 4),
+        })
+
+    return {"retrieved_docs": docs}
+
+
+@timer("generate_answer")
+def generate_answer_node(state: RAGState) -> dict:
+    llm = _get_llm()
+    docs = state.get("retrieved_docs", [])
+    question = state.get("expanded_question") or state["current_question"]
+
+    if not docs:
+        return {"answer": "抱歉，在法律法规库中没有找到相关内容。请尝试换一种方式提问。"}
+
+    context_parts = []
+    for i, d in enumerate(docs, 1):
+        ctx = f"[{i}] 来源：《{d['law_name']}》"
+        if d["article_range"]:
+            ctx += f" {d['article_range']}"
+        ctx += f"\n{d['content']}"
+        context_parts.append(ctx)
+
+    context = "\n\n".join(context_parts)
+
+    prompt = f"""你是一个专业法律顾问。请基于以下法律法规内容回答用户问题。
+
+要求：
+1. 回答应当准确引用法律条文
+2. 如果信息不足，明确告知用户
+3. 用通俗易懂的中文解释
+4. 标注引用来源（如：根据《劳动法》第X条）
+
+参考法律条文：
+{context}
+
+用户问题：{question}
+
+请给出专业回答："""
+
+    resp = llm.invoke([HumanMessage(content=prompt)])
+    return {"answer": resp.content.strip()}
+
+
+@timer("generate_references")
+def generate_references_node(state: RAGState) -> dict:
+    docs = state.get("retrieved_docs", [])
+    references = []
+
+    for d in docs:
+        law_name = d.get("law_name", "未知")
+        article = d.get("article_range", "")
+        preview = d.get("content", "")[:config.REFERENCE_PREVIEW_CHARS].replace("\n", "")
+        source = f"《{law_name}》"
+        if article:
+            source += f" {article}"
+        references.append({
+            "source": source,
+            "url": d.get("source_url", ""),
+            "preview": f"{preview}...",
+            "score": d.get("score", 0),
+        })
+
+    return {"references": references}
+
+
+@timer("generate_next_questions")
+def generate_next_questions_node(state: RAGState) -> dict:
+    llm = _get_llm()
+    question = state.get("expanded_question") or state["current_question"]
+    answer = state.get("answer", "")
+    docs = state.get("retrieved_docs", [])
+
+    law_names = list(set(d.get("law_name", "") for d in docs))
+    law_context = "、".join(law_names) if law_names else "相关法律"
+
+    prompt = f"""基于以下问答内容，生成3个用户可能继续追问的法律相关问题。
+每个问题应当简短、独立、有实际参考价值。
+
+用户问题：{question}
+回答：{answer[:300]}
+涉及法律：{law_context}
+
+请以JSON数组格式输出，例如：
+["问题1", "问题2", "问题3"]
+
+只输出JSON数组，不要其他内容。"""
+
+    resp = llm.invoke([HumanMessage(content=prompt)])
+    try:
+        questions = json.loads(resp.content.strip().removeprefix("```json").removesuffix("```").strip())
+        if not isinstance(questions, list):
+            questions = []
+    except (json.JSONDecodeError, ValueError):
+        questions = []
+
+    return {"next_questions": questions[:3]}
+
+
+def router(state: RAGState) -> Literal["reject_non_legal", "question_rewriting"]:
+    if state["intent"] == "non-legal":
+        return "reject_non_legal"
+    return "question_rewriting"
