@@ -1,4 +1,5 @@
 import json
+import urllib.request
 from typing import Literal
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.outputs import ChatResult
@@ -55,14 +56,15 @@ def intent_recognition_node(state: RAGState) -> dict:
     question = state.get("expanded_question") or state["current_question"]
 
     prompt = f"""你是一个法律问答系统的意图识别器。
-判断用户的问题是法律相关问题还是非法律问题。
+判断用户问题的类型：
 
-法律相关问题包括但不限于：劳动法、劳动合同法、民法典、消费者权益保护法、
-合同纠纷、婚姻家庭、继承、侵权、物权、债权、劳动争议、消费维权等。
+1. weather - 询问天气、气温、是否下雨、空气质量等天气相关问题
+2. legal - 劳动法、劳动合同法、民法典、消费者权益保护法、合同纠纷、婚姻家庭、继承、侵权等法律问题
+3. non-legal - 其他非法律、非天气问题
 
 请以JSON格式回答，不要其他内容：
 {{
-    "is_legal": true/false,
+    "intent": "legal/weather/non-legal",
     "reason": "简短判断理由"
 }}
 
@@ -72,10 +74,10 @@ def intent_recognition_node(state: RAGState) -> dict:
     try:
         result = json.loads(resp.content.strip().removeprefix("```json").removesuffix("```").strip())
     except json.JSONDecodeError:
-        result = {"is_legal": True, "reason": "解析失败，默认按法律问题处理"}
+        result = {"intent": "legal", "reason": "解析失败，默认按法律问题处理"}
 
     return {
-        "intent": "legal" if result["is_legal"] else "non-legal",
+        "intent": result.get("intent", "legal"),
         "intent_reason": result.get("reason", ""),
     }
 
@@ -265,7 +267,49 @@ def generate_next_questions_node(state: RAGState) -> dict:
     return {"next_questions": questions[:3]}
 
 
-def router(state: RAGState) -> Literal["reject_non_legal", "question_rewriting"]:
+def router(state: RAGState) -> Literal["reject_non_legal", "question_rewriting", "weather_answer"]:
     if state["intent"] == "non-legal":
         return "reject_non_legal"
+    if state["intent"] == "weather":
+        return "weather_answer"
     return "question_rewriting"
+
+
+@timer("weather_answer")
+def weather_answer_node(state: RAGState) -> dict:
+    llm = _get_llm()
+    question = state.get("expanded_question") or state["current_question"]
+
+    try:
+        url = "https://wttr.in/?format=j1"
+        req = urllib.request.Request(url, headers={"User-Agent": "curl"})
+        data = json.loads(urllib.request.urlopen(req, timeout=10).read().decode())
+        current = data["current_condition"][0]
+        area = data["nearest_area"][0]["areaName"][0]["value"]
+        weather_desc = current["weatherDesc"][0]["value"]
+        temp_c = current["temp_C"]
+        feels = current["FeelsLikeC"]
+        humidity = current["humidity"]
+        wind = f"{current['winddir16Point']} {current['windspeedKmph']}km/h"
+        weather_text = (
+            f"位置：{area}\n"
+            f"天气：{weather_desc}\n"
+            f"温度：{temp_c}°C（体感 {feels}°C）\n"
+            f"湿度：{humidity}%\n"
+            f"风向风速：{wind}"
+        )
+    except Exception as e:
+        weather_text = f"获取天气失败: {e}"
+
+    prompt = f"""你是一个天气助手。基于以下天气数据，用中文回答用户的问题。
+如果用户问某个特定城市但没有该城市数据，请告知用IP定位的结果。
+
+天气数据：
+{weather_text}
+
+用户问题：{question}
+
+请友好回答："""
+
+    resp = llm.invoke([HumanMessage(content=prompt)])
+    return {"answer": resp.content.strip()}
