@@ -15,3 +15,4 @@ class RAGState(TypedDict):
     references: List[dict]
     next_questions: List[str]
     error: str
+    blocked: bool

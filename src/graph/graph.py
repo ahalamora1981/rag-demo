@@ -2,6 +2,7 @@ from langgraph.graph import StateGraph, START, END
 from src.graph.state import RAGState
 from src.graph.nodes import (
     intent_recognition_node,
+    guardrail_node,
     chat_node,
     context_expansion_node,
     question_rewriting_node,
@@ -18,6 +19,7 @@ def build_rag_graph():
 
     builder.add_node("context_expansion", context_expansion_node)
     builder.add_node("intent_recognition", intent_recognition_node)
+    builder.add_node("guardrail", guardrail_node)
     builder.add_node("chat", chat_node)
     builder.add_node("question_rewriting", question_rewriting_node)
     builder.add_node("retrieve", retrieve_node)
@@ -31,8 +33,13 @@ def build_rag_graph():
     builder.add_conditional_edges(
         "intent_recognition",
         router,
-        {"chat": "chat", "question_rewriting": "question_rewriting"},
+        {
+            "guardrail": "guardrail",
+            "chat": "chat",
+            "question_rewriting": "question_rewriting",
+        },
     )
+    builder.add_edge("guardrail", END)
     builder.add_edge("chat", END)
     builder.add_edge("question_rewriting", "retrieve")
     builder.add_edge("retrieve", "generate_answer")

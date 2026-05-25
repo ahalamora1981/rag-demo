@@ -44,7 +44,13 @@ def cmd_ask():
             "references": [],
             "next_questions": [],
             "error": "",
+            "blocked": False,
         })
+
+        if result.get("blocked"):
+            messages.pop()
+            print(f"\nAI: {result['answer']}\n")
+            continue
 
         print(f"\nAI: {result['answer']}\n")
 
