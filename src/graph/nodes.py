@@ -19,7 +19,6 @@ def _get_llm(reasoning=False):
     }
     if reasoning and config.LLM_THINKING_ENABLED:
         kwargs["reasoning_effort"] = config.LLM_REASONING_EFFORT
-        kwargs["model_kwargs"] = {"thinking": {"type": "enabled"}}
     return ChatOpenAI(**kwargs)
 
 

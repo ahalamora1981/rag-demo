@@ -312,12 +312,24 @@ LLM_THINKING_ENABLED=true
 LLM_REASONING_EFFORT=high    # high 或 max
 ```
 
+### 延迟对比（问题："劳动者被违法辞退，可以获得哪些赔偿？"）
+
+| 指标 | Thinking 禁用 | Thinking 启用 |
+|------|:----:|:----:|
+| generate_answer | 10.8s | 14.0s |
+| 全流程耗时 | 16.9s | 19.4s |
+| 回答字数 | 1596 | 1809 |
+| 结构 | 列表式 | 分节式 + 法条原文引用 |
+
+> 思考模式额外开销约 15%，但回答更结构化、分析更深入，适合复杂法律推理场景。
+
 ### 参数控制
 
 | 参数 | 位置 | 含义 |
 |------|------|------|
-| `thinking: {"type": "enabled"}` | `model_kwargs` → `extra_body` | 开关 |
-| `reasoning_effort: "high"/"max"` | ChatOpenAI 构造参数 | 强度（`low`/`medium` 映射为 `high`，`xhigh` 映射为 `max`） |
+| `reasoning_effort: "high"/"max"` | ChatOpenAI 构造参数 | 强度（`low`/`medium` 映射为 `high`） |
+
+说明：DeepSeek 默认 thinking 开关已启用，只需设置 `reasoning_effort` 即可。无需额外配置。
 
 ### 节点分布
 
