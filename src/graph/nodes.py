@@ -1,7 +1,9 @@
 import json
 import urllib.request
-from typing import Literal
-from langchain_core.messages import SystemMessage, HumanMessage
+import urllib.parse
+from typing import Literal, Optional
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
+from langchain_core.tools import tool
 from langchain_core.outputs import ChatResult
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from src.graph.state import RAGState
@@ -16,13 +18,13 @@ from src.timer import timer
 class DeepSeekChatOpenAI(ChatOpenAI):
     """ChatOpenAI subclass that supports DeepSeek thinking mode via extra_body."""
 
-    thinking_type: str | None = None  # "enabled" | "disabled"
+    thinking_type: Optional[str] = None  # "enabled" | "disabled"
 
     def _generate(
         self,
         messages: list,
-        stop: list[str] | None = None,
-        run_manager: CallbackManagerForLLMRun | None = None,
+        stop: Optional[list[str]] = None,
+        run_manager: Optional[CallbackManagerForLLMRun] = None,
         **kwargs,
     ) -> ChatResult:
         self._ensure_sync_client_available()
@@ -34,7 +36,7 @@ class DeepSeekChatOpenAI(ChatOpenAI):
         return self._create_chat_result(raw_response.parse())
 
 
-def _get_llm(reasoning=False):
+def _get_llm(reasoning=False, disable_thinking=False):
     kwargs = {
         "model": config.LLM_MODEL,
         "base_url": config.LLM_BASE_URL,
@@ -47,7 +49,35 @@ def _get_llm(reasoning=False):
             kwargs["thinking_type"] = "enabled"
         else:
             kwargs["thinking_type"] = "disabled"
+    elif disable_thinking:
+        kwargs["thinking_type"] = "disabled"
     return DeepSeekChatOpenAI(**kwargs)
+
+
+@tool
+def get_weather(location: str = "") -> str:
+    """获取当前天气信息。如果不指定location，则基于IP自动定位。"""
+    try:
+        loc = urllib.parse.quote(location.strip()) if location else ""
+        url = f"https://wttr.in/{loc}?format=j1"
+        req = urllib.request.Request(url, headers={"User-Agent": "curl"})
+        data = json.loads(urllib.request.urlopen(req, timeout=10).read().decode())
+        current = data["current_condition"][0]
+        area = data["nearest_area"][0]["areaName"][0]["value"]
+        weather_desc = current["weatherDesc"][0]["value"]
+        temp_c = current["temp_C"]
+        feels = current["FeelsLikeC"]
+        humidity = current["humidity"]
+        wind = f"{current['winddir16Point']} {current['windspeedKmph']}km/h"
+        return (
+            f"位置：{area}\n"
+            f"天气：{weather_desc}\n"
+            f"温度：{temp_c}°C（体感 {feels}°C）\n"
+            f"湿度：{humidity}%\n"
+            f"风向风速：{wind}"
+        )
+    except Exception as e:
+        return f"获取天气失败: {e}"
 
 
 @timer("intent_recognition")
@@ -58,13 +88,12 @@ def intent_recognition_node(state: RAGState) -> dict:
     prompt = f"""你是一个法律问答系统的意图识别器。
 判断用户问题的类型：
 
-1. weather - 询问天气、气温、是否下雨、空气质量等天气相关问题
-2. legal - 劳动法、劳动合同法、民法典、消费者权益保护法、合同纠纷、婚姻家庭、继承、侵权等法律问题
-3. non-legal - 其他非法律、非天气问题
+legal - 劳动法、劳动合同法、民法典、消费者权益保护法、合同纠纷、婚姻家庭、继承、侵权、物权、债权、劳动争议、消费维权等
+chat  - 天气、笑话、日常闲聊等其他非法律问题
 
 请以JSON格式回答，不要其他内容：
 {{
-    "intent": "legal/weather/non-legal",
+    "intent": "legal/chat",
     "reason": "简短判断理由"
 }}
 
@@ -82,26 +111,29 @@ def intent_recognition_node(state: RAGState) -> dict:
     }
 
 
-@timer("reject_non_legal")
-def reject_non_legal_node(state: RAGState) -> dict:
-    llm = _get_llm()
-    question = state["current_question"]
-    reason = state.get("intent_reason", "")
+@timer("chat")
+def chat_node(state: RAGState) -> dict:
+    llm = _get_llm(disable_thinking=True)
+    question = state.get("expanded_question") or state["current_question"]
 
-    prompt = f"""用户的问题不是法律相关问题。
-请礼貌告知只能回答法律相关问题，并列出以下可咨询的法律领域：
-- 劳动法（劳动合同、工资、工时、社保等）
-- 劳动合同法（签订、解除、经济补偿等）
-- 民法典（婚姻家庭、继承、合同、侵权等）
-- 消费者权益保护法（消费维权、退货、欺诈赔偿等）
+    system = SystemMessage(content=(
+        "你是一个友好的中文助手。你可以回答日常问题，也可以使用 get_weather 工具查询天气。"
+        "如果用户问天气但没指定城市，调用 get_weather 时 location 留空即可。"
+    ))
+    llm_with_tools = llm.bind_tools([get_weather])
 
-判断理由：{reason}
-用户问题：{question}
+    msgs = [system, HumanMessage(content=question)]
+    resp = llm_with_tools.invoke(msgs)
 
-请用中文简洁回答。"""
+    if resp.tool_calls:
+        msgs.append(resp)
+        for tc in resp.tool_calls:
+            if tc["name"] == "get_weather":
+                result = get_weather.invoke(tc["args"])
+                msgs.append(ToolMessage(content=result, tool_call_id=tc["id"]))
+        resp = llm_with_tools.invoke(msgs)
 
-    resp = llm.invoke([HumanMessage(content=prompt)])
-    return {"answer": resp.content}
+    return {"answer": resp.content.strip()}
 
 
 @timer("context_expansion")
@@ -267,49 +299,7 @@ def generate_next_questions_node(state: RAGState) -> dict:
     return {"next_questions": questions[:3]}
 
 
-def router(state: RAGState) -> Literal["reject_non_legal", "question_rewriting", "weather_answer"]:
-    if state["intent"] == "non-legal":
-        return "reject_non_legal"
-    if state["intent"] == "weather":
-        return "weather_answer"
+def router(state: RAGState) -> Literal["chat", "question_rewriting"]:
+    if state["intent"] == "chat":
+        return "chat"
     return "question_rewriting"
-
-
-@timer("weather_answer")
-def weather_answer_node(state: RAGState) -> dict:
-    llm = _get_llm()
-    question = state.get("expanded_question") or state["current_question"]
-
-    try:
-        url = "https://wttr.in/?format=j1"
-        req = urllib.request.Request(url, headers={"User-Agent": "curl"})
-        data = json.loads(urllib.request.urlopen(req, timeout=10).read().decode())
-        current = data["current_condition"][0]
-        area = data["nearest_area"][0]["areaName"][0]["value"]
-        weather_desc = current["weatherDesc"][0]["value"]
-        temp_c = current["temp_C"]
-        feels = current["FeelsLikeC"]
-        humidity = current["humidity"]
-        wind = f"{current['winddir16Point']} {current['windspeedKmph']}km/h"
-        weather_text = (
-            f"位置：{area}\n"
-            f"天气：{weather_desc}\n"
-            f"温度：{temp_c}°C（体感 {feels}°C）\n"
-            f"湿度：{humidity}%\n"
-            f"风向风速：{wind}"
-        )
-    except Exception as e:
-        weather_text = f"获取天气失败: {e}"
-
-    prompt = f"""你是一个天气助手。基于以下天气数据，用中文回答用户的问题。
-如果用户问某个特定城市但没有该城市数据，请告知用IP定位的结果。
-
-天气数据：
-{weather_text}
-
-用户问题：{question}
-
-请友好回答："""
-
-    resp = llm.invoke([HumanMessage(content=prompt)])
-    return {"answer": resp.content.strip()}
