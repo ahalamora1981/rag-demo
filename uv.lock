@@ -2067,6 +2067,7 @@ dependencies = [
     { name = "langgraph" },
     { name = "onnxruntime" },
     { name = "python-dotenv" },
+    { name = "tavily-python" },
 ]
 
 [package.metadata]
@@ -2079,6 +2080,7 @@ requires-dist = [
     { name = "langgraph", specifier = ">=1.2.1" },
     { name = "onnxruntime", specifier = ">=1.26.0" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
+    { name = "tavily-python", specifier = ">=0.7.24" },
 ]
 
 [[package]]
@@ -2383,6 +2385,20 @@ wheels = [
     { url = "https://mirrors.aliyun.com/pypi/packages/f2/e3/5aa06f167559f8c0bdae487e297d23ba548150ab016a3418265d617a4985/sqlalchemy-2.0.50-cp314-cp314t-win32.whl", hash = "sha256:1fbd55a969d7ac44a98e3dec75016074f809fa08f871585ace58dde110d1bf3e" },
     { url = "https://mirrors.aliyun.com/pypi/packages/65/9b/112fb8f977582d7489d036e409e3723948bcf5320b3ac465f3c481bbe8f9/sqlalchemy-2.0.50-cp314-cp314t-win_amd64.whl", hash = "sha256:c5c3cdb753a9004183e1ccb634b41611654c989e61bc68617ce878e46d6f1e51" },
     { url = "https://mirrors.aliyun.com/pypi/packages/d0/10/f7220e9b784d295d241c86ed99aeb537f92afcd469a64861f2717e9bb077/sqlalchemy-2.0.50-py3-none-any.whl", hash = "sha256:92064363517a3ff8212b5a93b8c62876579d8dfd1ca5b561335f30152d884fa9" },
+]
+
+[[package]]
+name = "tavily-python"
+version = "0.7.24"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
+dependencies = [
+    { name = "httpx" },
+    { name = "requests" },
+    { name = "tiktoken" },
+]
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/92/d3/a6a9c24bfafed30b4ce3c3d685ab00806ad631c9742441f2597ec91f0002/tavily_python-0.7.24.tar.gz", hash = "sha256:6c8954193c6472231e813fe50cbd07806bd86c7228957675eb45875a44d58296" }
+wheels = [
+    { url = "https://mirrors.aliyun.com/pypi/packages/63/ce/37e3aba0f359f540bfc57eb178f73d521161761f21e0aa28749f42750b11/tavily_python-0.7.24-py3-none-any.whl", hash = "sha256:1a750108de42c4b0b46e4c1b7b64aeaf7fad7d7bac9167927edce0081fe166c9" },
 ]
 
 [[package]]

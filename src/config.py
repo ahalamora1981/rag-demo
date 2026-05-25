@@ -14,6 +14,8 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "")
 LLM_THINKING_ENABLED = os.getenv("LLM_THINKING_ENABLED", "true").lower() == "true"
 LLM_REASONING_EFFORT = os.getenv("LLM_REASONING_EFFORT", "high")
 
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
+
 CHROMA_HOST = "localhost"
 CHROMA_PORT = 8100
 COLLECTION_NAME = "laws_rag"

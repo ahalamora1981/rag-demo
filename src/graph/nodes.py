@@ -9,6 +9,7 @@ from langchain_core.callbacks import CallbackManagerForLLMRun
 from src.graph.state import RAGState
 from langchain_openai import ChatOpenAI
 from langchain_chroma import Chroma
+from tavily import TavilyClient
 from src import config
 from src.embeddings import create_embeddings
 from src.indexing.indexer import get_vectorstore
@@ -80,6 +81,21 @@ def get_weather(location: str = "") -> str:
         return f"获取天气失败: {e}"
 
 
+@tool
+def search_web(query: str) -> str:
+    """搜索互联网获取实时信息。适用于新闻、百科、时事、人物、科技等需要联网查询的问题。
+    返回结果的标题和内容摘要。"""
+    try:
+        client = TavilyClient(api_key=config.TAVILY_API_KEY)
+        result = client.search(query, search_depth="basic", max_results=5)
+        lines = []
+        for r in result.get("results", []):
+            lines.append(f"- {r['title']}\n  {r['content']}\n  来源: {r['url']}")
+        return "\n\n".join(lines) if lines else "未找到相关结果"
+    except Exception as e:
+        return f"搜索失败: {e}"
+
+
 @timer("intent_recognition")
 def intent_recognition_node(state: RAGState) -> dict:
     llm = _get_llm()
@@ -117,21 +133,27 @@ def chat_node(state: RAGState) -> dict:
     question = state.get("expanded_question") or state["current_question"]
 
     system = SystemMessage(content=(
-        "你是一个友好的中文助手。你可以回答日常问题，也可以使用 get_weather 工具查询天气。"
-        "如果用户问天气但没指定城市，调用 get_weather 时 location 留空即可。"
+        "你是一个友好的中文助手。你可以使用工具获取实时信息：\n"
+        "- get_weather: 查询天气（用户不指定城市时 location 留空）\n"
+        "- search_web: 搜索互联网获取新闻、百科、实时数据"
     ))
-    llm_with_tools = llm.bind_tools([get_weather])
-
+    llm_with_tools = llm.bind_tools([get_weather, search_web])
     msgs = [system, HumanMessage(content=question)]
-    resp = llm_with_tools.invoke(msgs)
 
-    if resp.tool_calls:
+    for _ in range(5):
+        resp = llm_with_tools.invoke(msgs)
+        if not resp.tool_calls:
+            break
         msgs.append(resp)
         for tc in resp.tool_calls:
-            if tc["name"] == "get_weather":
+            name = tc["name"]
+            if name == "get_weather":
                 result = get_weather.invoke(tc["args"])
-                msgs.append(ToolMessage(content=result, tool_call_id=tc["id"]))
-        resp = llm_with_tools.invoke(msgs)
+            elif name == "search_web":
+                result = search_web.invoke(tc["args"])
+            else:
+                result = f"未知工具: {name}"
+            msgs.append(ToolMessage(content=result, tool_call_id=tc["id"]))
 
     return {"answer": resp.content.strip()}
 
