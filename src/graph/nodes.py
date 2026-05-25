@@ -10,13 +10,17 @@ from src.indexing.indexer import get_vectorstore
 from src.timer import timer
 
 
-def _get_llm():
-    return ChatOpenAI(
-        model=config.LLM_MODEL,
-        base_url=config.LLM_BASE_URL,
-        api_key=config.LLM_API_KEY,
-        temperature=0.1,
-    )
+def _get_llm(reasoning=False):
+    kwargs = {
+        "model": config.LLM_MODEL,
+        "base_url": config.LLM_BASE_URL,
+        "api_key": config.LLM_API_KEY,
+        "temperature": 0.1,
+    }
+    if reasoning and config.LLM_THINKING_ENABLED:
+        kwargs["reasoning_effort"] = config.LLM_REASONING_EFFORT
+        kwargs["model_kwargs"] = {"thinking": {"type": "enabled"}}
+    return ChatOpenAI(**kwargs)
 
 
 @timer("intent_recognition")
@@ -144,7 +148,7 @@ def retrieve_node(state: RAGState) -> dict:
 
 @timer("generate_answer")
 def generate_answer_node(state: RAGState) -> dict:
-    llm = _get_llm()
+    llm = _get_llm(reasoning=True)
     docs = state.get("retrieved_docs", [])
     question = state.get("expanded_question") or state["current_question"]
 

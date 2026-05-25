@@ -137,6 +137,8 @@ Chroma 运行在 `localhost:8100`，数据持久化到 `chroma-data/` 目录。
 LLM_BASE_URL=https://api.deepseek.com
 LLM_API_KEY=your_deepseek_key
 LLM_MODEL=deepseek-v4-flash
+LLM_THINKING_ENABLED=false    # 设为 true 开启思考模式
+LLM_REASONING_EFFORT=high     # high 或 max
 EMBEDDING_BASE_URL=https://api.siliconflow.cn/v1
 EMBEDDING_API_KEY=your_siliconflow_key
 EMBEDDING_MODEL=BAAI/bge-m3
@@ -273,6 +275,8 @@ rag-demo/
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | `LLM_MODEL` | `deepseek-v4-flash` | 对话模型 |
+| `LLM_THINKING_ENABLED` | `false` | 是否开启思考模式 |
+| `LLM_REASONING_EFFORT` | `high` | 思考强度（`high`/`max`） |
 | `EMBEDDING_MODEL` | `BAAI/bge-m3` | 嵌入模型 |
 | `CHUNK_SIZE` | 500 | 切片字符数 |
 | `CHUNK_OVERLAP` | 80 | 切片重叠字符数 |
@@ -294,6 +298,36 @@ rag-demo/
 - 切分后自动用正则 `第[一二三四五六七八九十百千零\d]+条` 提取每个块中覆盖的法条范围，存入元数据
 
 4 部法律共产生 329 个 chunks，每条 chunk 携带元数据：`law_name`、`source_file`、`source_url`、`article_range`。
+
+## 思考模式（Thinking Mode）
+
+DeepSeek-V4 支持在输出答案前进行内部推理（思维链），显著提升复杂法律问题的准确性。当前**仅对 `generate_answer` 节点启用**，其余节点（意图、扩写、重写、追问）使用普通模式以降低延迟和成本。
+
+### 启用方式
+
+`.env` 中设置：
+
+```env
+LLM_THINKING_ENABLED=true
+LLM_REASONING_EFFORT=high    # high 或 max
+```
+
+### 参数控制
+
+| 参数 | 位置 | 含义 |
+|------|------|------|
+| `thinking: {"type": "enabled"}` | `model_kwargs` → `extra_body` | 开关 |
+| `reasoning_effort: "high"/"max"` | ChatOpenAI 构造参数 | 强度（`low`/`medium` 映射为 `high`，`xhigh` 映射为 `max`） |
+
+### 节点分布
+
+| 节点 | 思考模式 | 理由 |
+|------|---------|------|
+| context_expansion | 关闭 | 简单问题合并，无需推理 |
+| intent_recognition | 关闭 | 二分类判断，无需推理 |
+| question_rewriting | 关闭 | 关键词提取，无需推理 |
+| **generate_answer** | **开启** | 法条解读 + 法律推理，适合思维链 |
+| generate_next_questions | 关闭 | 简单问题生成，无需推理 |
 
 ## 模型选择
 
