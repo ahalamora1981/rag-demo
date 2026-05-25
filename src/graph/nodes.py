@@ -59,6 +59,7 @@ def _get_llm(reasoning=False, disable_thinking=False):
 
 
 @tool
+@timer("get_weather")
 def get_weather(location: str = "") -> str:
     """获取当前天气信息。如果不指定location，则基于IP自动定位。"""
     try:
@@ -85,6 +86,7 @@ def get_weather(location: str = "") -> str:
 
 
 @tool
+@timer("search_web")
 def search_web(query: str) -> str:
     """搜索互联网获取实时信息。适用于新闻、百科、时事、人物、科技等需要联网查询的问题。
     返回结果的标题和内容摘要。"""
