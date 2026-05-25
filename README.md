@@ -13,14 +13,13 @@
 │          └──────────┬──────────┘                  │
 │                     │                             │
 │          ┌──────────▼──────────┐                  │
-│          │ intent_recognition │  ← 2. 意图识别     │
-│          └──────┬─────┬───────┘                  │
-│          legal  │     │  chat                    │
-│    ┌────────────▼─┐  ┌▼──────────────────┐      │
-│    │question       │  │chat_node          │      │
-│    │_rewriting     │  │ LLM + tools:       │      │
-│    │  ← 3. 检索优化│  │ • get_weather     │      │
-│    └──────┬───────┘  │ • search_web(Tavily)│      │
+│          │ intent_recognition │  ← 2. 意图 + 安全识别 │
+│          └────┬──┬────┬───────┘                      │
+│       legal  │  │chat │ unsafe                       │
+│    ┌─────────▼┐ ┌▼────▼─┐ ┌▼──────────────┐        │
+│    │question   │ │chat    │ │guardrail      │        │
+│    │_rewriting │ │+ tools │ │⚠ 拦截警告      │        │
+│    └──────┬───┘ └───────┘ └───────────────┘        │
 │           │          └────────────────────┘      │
 │    ┌──────▼───────┐                              │
 │    │ retrieve     │  ← 4. Chroma L2 向量检索      │
@@ -51,6 +50,7 @@
 |------|------|------|
 | **legal** | 问题重写 → 检索 → 生成 → 引用 → 追问 | 法律 RAG 全流程 |
 | **chat** | LLM + 工具 (weather / search) | 天气用 wttr.in，搜索用 Tavily |
+| **unsafe** | guardrail → 拦截警告 | 暴力/非法/越狱等危险问题直接拦截 |
 
 ### 各环节详解
 
@@ -64,9 +64,19 @@
 
 > 例如：上文在讨论试用期，用户问"那工资呢？" → 扩写为"试用期的工资标准是什么？"
 
-#### 2. intent_recognition（意图识别）
+#### 2. intent_recognition（意图识别 + 安全卫士）
 
-使用扩写后的问题（不是原始问题）做意图分类，避免省略型追问被误判。输出 JSON：`{"intent": "legal/chat", "reason": "..."}`。若为闲聊（天气、笑话、搜索等）转入 chat 节点，若为法律问题进入 RAG 流程。解析失败时**默认按法律问题处理**，保证不丢答。
+使用扩写后的问题做分类，同时检测不安全内容。输出 JSON：`{"intent": "legal/chat/unsafe", "reason": "..."}`。
+
+- **legal** → 进入法律 RAG 全流程
+- **chat** → 进入闲聊路径（LLM + 工具调用）
+- **unsafe** → 进入 guardrail 拦截，问题不入历史
+
+解析失败时**默认按法律问题处理**，保证不丢答。
+
+#### guardrail（安全拦截）
+
+当意图识别为 `unsafe` 时触发。直接返回警告信息，**该问题不加入对话历史**，确保危险内容不污染后续上下文。
 
 #### 3. question_rewriting（问题重写）
 
@@ -229,6 +239,7 @@ AI: [自动扩写为"试用期的工资标准是什么？"]
 |------|---------|------|
 | context_expansion | ~0s（首轮） / ~1.5s（多轮） | 首轮跳过 |
 | intent_recognition | ~2s | DeepSeek-V4-Flash |
+| guardrail | ~0s | 无 LLM 调用，直接返回 |
 | question_rewriting | ~1.5s | DeepSeek-V4-Flash |
 | retrieve | ~0.4s | bge-m3 嵌入 + Chroma 搜索 |
 | generate_answer | ~3s | DeepSeek-V4-Flash |
