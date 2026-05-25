@@ -1,6 +1,8 @@
 import json
 from typing import Literal
 from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.outputs import ChatResult
+from langchain_core.callbacks import CallbackManagerForLLMRun
 from src.graph.state import RAGState
 from langchain_openai import ChatOpenAI
 from langchain_chroma import Chroma
@@ -10,6 +12,27 @@ from src.indexing.indexer import get_vectorstore
 from src.timer import timer
 
 
+class DeepSeekChatOpenAI(ChatOpenAI):
+    """ChatOpenAI subclass that supports DeepSeek thinking mode via extra_body."""
+
+    thinking_type: str | None = None  # "enabled" | "disabled"
+
+    def _generate(
+        self,
+        messages: list,
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs,
+    ) -> ChatResult:
+        self._ensure_sync_client_available()
+        payload = self._get_request_payload(messages, stop=stop, **kwargs)
+        extra = {}
+        if self.thinking_type:
+            extra["extra_body"] = {"thinking": {"type": self.thinking_type}}
+        raw_response = self.client.with_raw_response.create(**payload, **extra)
+        return self._create_chat_result(raw_response.parse())
+
+
 def _get_llm(reasoning=False):
     kwargs = {
         "model": config.LLM_MODEL,
@@ -17,9 +40,13 @@ def _get_llm(reasoning=False):
         "api_key": config.LLM_API_KEY,
         "temperature": 0.1,
     }
-    if reasoning and config.LLM_THINKING_ENABLED:
-        kwargs["reasoning_effort"] = config.LLM_REASONING_EFFORT
-    return ChatOpenAI(**kwargs)
+    if reasoning:
+        if config.LLM_THINKING_ENABLED:
+            kwargs["reasoning_effort"] = config.LLM_REASONING_EFFORT
+            kwargs["thinking_type"] = "enabled"
+        else:
+            kwargs["thinking_type"] = "disabled"
+    return DeepSeekChatOpenAI(**kwargs)
 
 
 @timer("intent_recognition")
