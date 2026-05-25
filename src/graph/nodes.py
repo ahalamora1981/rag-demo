@@ -1,6 +1,7 @@
 import json
 import urllib.request
 import urllib.parse
+from datetime import date
 from typing import Literal, Optional
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 from langchain_core.tools import tool
@@ -14,6 +15,8 @@ from src import config
 from src.embeddings import create_embeddings
 from src.indexing.indexer import get_vectorstore
 from src.timer import timer
+
+TODAY = date.today().strftime("%Y年%m月%d日")
 
 
 class DeepSeekChatOpenAI(ChatOpenAI):
@@ -133,6 +136,7 @@ def chat_node(state: RAGState) -> dict:
     question = state.get("expanded_question") or state["current_question"]
 
     system = SystemMessage(content=(
+        f"今天是{TODAY}。\n"
         "你是一个友好的中文助手。你可以使用工具获取实时信息：\n"
         "- get_weather: 查询天气（用户不指定城市时 location 留空）\n"
         "- search_web: 搜索互联网获取新闻、百科、实时数据"
@@ -247,7 +251,7 @@ def generate_answer_node(state: RAGState) -> dict:
 
     context = "\n\n".join(context_parts)
 
-    prompt = f"""你是一个专业法律顾问。请基于以下法律法规内容回答用户问题。
+    prompt = f"""你是一个专业法律顾问。今天是{TODAY}。请基于以下法律法规内容回答用户问题。
 
 要求：
 1. 回答应当准确引用法律条文
