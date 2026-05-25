@@ -137,7 +137,7 @@ Chroma 运行在 `localhost:8100`，数据持久化到 `chroma-data/` 目录。
 LLM_BASE_URL=https://api.deepseek.com
 LLM_API_KEY=your_deepseek_key
 LLM_MODEL=deepseek-v4-flash
-LLM_THINKING_ENABLED=false    # 设为 true 开启思考模式
+LLM_THINKING_ENABLED=true     # 是否开启思考模式
 LLM_REASONING_EFFORT=high     # high 或 max
 EMBEDDING_BASE_URL=https://api.siliconflow.cn/v1
 EMBEDDING_API_KEY=your_siliconflow_key
@@ -275,7 +275,7 @@ rag-demo/
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | `LLM_MODEL` | `deepseek-v4-flash` | 对话模型 |
-| `LLM_THINKING_ENABLED` | `false` | 是否开启思考模式 |
+| `LLM_THINKING_ENABLED` | `true` | 是否开启思考模式 |
 | `LLM_REASONING_EFFORT` | `high` | 思考强度（`high`/`max`） |
 | `EMBEDDING_MODEL` | `BAAI/bge-m3` | 嵌入模型 |
 | `CHUNK_SIZE` | 500 | 切片字符数 |

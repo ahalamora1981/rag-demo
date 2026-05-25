@@ -11,7 +11,7 @@ EMBEDDING_BASE_URL = os.getenv("EMBEDDING_BASE_URL", "")
 EMBEDDING_API_KEY = os.getenv("EMBEDDING_API_KEY", "")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "")
 
-LLM_THINKING_ENABLED = os.getenv("LLM_THINKING_ENABLED", "false").lower() == "true"
+LLM_THINKING_ENABLED = os.getenv("LLM_THINKING_ENABLED", "true").lower() == "true"
 LLM_REASONING_EFFORT = os.getenv("LLM_REASONING_EFFORT", "high")
 
 CHROMA_HOST = "localhost"
