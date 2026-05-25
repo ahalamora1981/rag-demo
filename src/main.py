@@ -1,5 +1,6 @@
 import sys
 from langchain_core.messages import HumanMessage
+from src import config
 from src.indexing.indexer import build_index
 from src.graph.graph import build_rag_graph
 
@@ -14,8 +15,9 @@ def cmd_ask():
     graph = build_rag_graph()
     messages = []
 
+    status = "enabled" if config.LLM_THINKING_ENABLED else "disabled"
     print("=== Legal RAG Q&A ===")
-    print("Enter 'quit' to exit, 'clear' to clear history.\n")
+    print(f"Thinking: {status} | Enter 'quit' to exit, 'clear' to clear history.\n")
 
     while True:
         question = input("\nYou: ").strip()
@@ -62,16 +64,24 @@ def cmd_ask():
         messages = result["messages"]
 
 
+def print_usage():
+    print("Usage:")
+    print("  uv run python -m src.main index")
+    print("  uv run python -m src.main ask [--no-think]")
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: uv run python -m src.main [index|ask]")
+        print_usage()
         sys.exit(1)
 
     cmd = sys.argv[1]
     if cmd == "index":
         cmd_index()
     elif cmd == "ask":
+        if "--no-think" in sys.argv:
+            config.LLM_THINKING_ENABLED = False
         cmd_ask()
     else:
         print(f"Unknown command: {cmd}")
-        print("Usage: uv run python -m src.main [index|ask]")
+        print_usage()
